@@ -1,0 +1,18 @@
+[project]
+name = "anim-complex-matrix"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.10.0",
+    "numpy>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4.3.4",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.1",
+    "ruff>=0.8.4",
+]
