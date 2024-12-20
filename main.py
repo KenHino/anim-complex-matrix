@@ -6,229 +6,246 @@ from matplotlib.patches import Rectangle
 import matplotlib.colors as mcolors
 
 
-def _validate_input(data: NDArray[np.complex128], time: NDArray) -> None:
-    """Validate input data for complex matrix animation.
+class ComplexMatrixAnimation:
+    fig: plt.Figure
+    ax: plt.Axes
+    cax: plt.Axes
 
-    Args:
-        data: Input array to validate
+    def __init__(
+        self,
+        data: NDArray[np.complex128],
+        time: NDArray | None = None,
+        title: str = "Complex Matrix Hinton Plot",
+        row_names: list[str] | None = None,
+        col_names: list[str] | None = None,
+        time_unit: str = "",
+        cmap: str = "hsv",
+        figshape: tuple[int, int] = (14, 10),
+    ) -> None:
+        self.data = data
+        if time is None:
+            time = np.arange(data.shape[0], dtype=np.float64)
+        self.time = time
+        self.title = title
+        self.row_names = row_names
+        self.col_names = col_names
+        self.time_unit = time_unit
+        self.figshape = figshape
+        self.cmap = cmap
+        self._validate_input()
+        self.norm = np.abs(self.data).real
+        self.maxnorm = self.norm.max()
+        phase = np.angle(self.data)  # -pi to pi
+        self.phase = (phase + 2 * np.pi) % (2 * np.pi)  # 0 to 2pi
 
-    Raises:
-        ValueError: If data is not complex128 or not a square matrix
-    """
-    if not isinstance(data, np.ndarray) or data.dtype != np.complex128:
-        raise ValueError("Input must be a complex128 numpy array")
+    @property
+    def rows(self) -> int:
+        return self.data.shape[1]
 
-    if not isinstance(time, np.ndarray):
-        raise ValueError("Time must be a numpy array")
+    @property
+    def cols(self) -> int:
+        return self.data.shape[2]
 
-    if len(data.shape) != 3:
-        raise ValueError("Input must have shape (time, row, column)")
+    def _validate_input(self) -> None:
+        """Validate input data for complex matrix animation.
 
-    if len(time.shape) != 1:
-        raise ValueError("Time must be a 1D array")
+        Raises:
+            ValueError: If data is not complex128 or not a square matrix
+        """
+        if not isinstance(self.data, np.ndarray) or self.data.dtype != np.complex128:
+            raise ValueError("Input must be a complex128 numpy array")
 
-    if data.shape[0] != time.shape[0]:
-        raise ValueError("Time steps must match the first dimension of the data")
+        if not isinstance(self.time, np.ndarray):
+            raise ValueError("Time must be a numpy array")
 
-    _, rows, cols = data.shape
-    if rows != cols:
-        raise ValueError(
-            f"Each frame must be a square matrix, got shape ({rows}, {cols})"
+        if len(self.data.shape) != 3:
+            raise ValueError("Input must have shape (time, row, column)")
+
+        if len(self.time.shape) != 1:
+            raise ValueError("Time must be a 1D array")
+
+        if self.data.shape[0] != self.time.shape[0]:
+            raise ValueError("Time steps must match the first dimension of the data")
+
+        if self.row_names is not None and len(self.row_names) != self.data.shape[1]:
+            raise ValueError(
+                "Number of row names must match the number of rows in the matrix"
+            )
+        if self.col_names is not None and len(self.col_names) != self.data.shape[2]:
+            raise ValueError(
+                "Number of column names must match the number of columns in the matrix"
+            )
+
+        _, rows, cols = self.data.shape
+        if rows != cols:
+            raise ValueError(
+                f"Each frame must be a square matrix, got shape ({rows}, {cols})"
+            )
+
+    def set_ax(self, title: str | None = None) -> None:
+        ax = self.ax
+        cols = self.cols
+        rows = self.rows
+        if title is None:
+            title = self.title
+        assert isinstance(title, str)
+        row_names = self.row_names
+        col_names = self.col_names
+        ax.set_title(title, fontsize=24)
+        ax.set_xlim(-1, cols)
+        ax.set_ylim(-1, rows)
+        ax.grid(True)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xticks(np.arange(cols))
+        ax.set_yticks(np.arange(rows))
+        ax.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
+        ax.invert_yaxis()
+        if row_names:
+            # set fontsize=14
+            ax.set_yticklabels(row_names, fontsize=16)
+        if col_names:
+            ax.set_xticklabels(col_names, fontsize=16)
+
+    def setup_figure(
+        self,
+    ):
+        """Set up the figure and axes for the Hinton plot.
+
+        Args:
+            shape: Shape of the matrix (rows, columns)
+
+        Returns:
+            Figure and Axes objects
+        """
+        plt.ioff()
+        self.fig = plt.figure(figsize=self.figshape)
+        self.ax = plt.axes((0.1, 0.1, 0.7, 0.8))  # [left, bottom, width, height]
+        self.set_ax()
+        self.cax = plt.axes((0.75, 0.4, 0.2, 0.2), projection="polar")
+        self.set_cyclic_colorbar()
+
+    def plot_each_element(
+        self,
+        i: int,
+        j: int,
+        cmap: plt.Colormap,
+        norm: np.ndarray,
+        phase: np.ndarray,
+        data: np.ndarray,
+    ) -> None:
+        """Plot each element of the complex matrix.
+
+        Args:
+            i: Row index
+            j: Column index
+            cmap: Colormap object
+            norm: Magnitude of the complex number
+            phase: Phase of the complex number
+            data: Complex matrix data
+        """
+        magnitude = norm[i, j]
+        phase_value = phase[i, j]
+        value = data[i, j]
+
+        if magnitude > 0:
+            # Size based on normalized magnitude
+            size = (magnitude / self.maxnorm) * 0.95
+
+            # Color based on phase (normalize from [0, 2π] to [0, 1])
+            # color = cmap((phase_value + np.pi) / (2 * np.pi))
+            color = cmap(phase_value / (2 * np.pi))
+
+            # Create and add rectangle
+            rect = Rectangle(
+                (j - size / 2, i - size / 2),
+                size,
+                size,
+                facecolor=color,
+                edgecolor="gray",
+            )
+            self.ax.add_patch(rect)
+
+            # Add text annotation
+            text = f"{value: .2f}"
+            self.ax.text(
+                j,
+                i,
+                text,
+                horizontalalignment="center",
+                verticalalignment="center",
+                fontsize=8,
+                color="white",
+                bbox=dict(facecolor="black", alpha=0.7, edgecolor="none"),
+            )
+
+    def update(self, frame_num: int) -> None:
+        """Update function for animation.
+
+        Args:
+            frame_num: Frame number
+        """
+        # Get current frame data
+        frame_data = self.data[frame_num]
+        rows, cols = frame_data.shape
+        time = self.time[frame_num]
+        title = f"{self.title} {time: .2f} {self.time_unit}"
+        self.ax.clear()
+        self.set_ax(title)
+        _cmap = plt.get_cmap(self.cmap)
+        norm = self.norm[frame_num]
+        phase = self.phase[frame_num]
+
+        # Plot each element
+        for i in range(rows):
+            for j in range(cols):
+                self.plot_each_element(i, j, _cmap, norm, phase, frame_data)
+
+    def set_cyclic_colorbar(self) -> mcolors.Colormap:
+        ax = self.cax
+
+        theta = np.linspace(0.0, 2 * np.pi, 100)
+        r = np.linspace(0, 1, 100)
+
+        Theta, R = np.meshgrid(theta, r)
+
+        cmap = plt.get_cmap(self.cmap)
+        norm = mcolors.Normalize(vmin=0.0, vmax=2 * np.pi)
+
+        ax.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2])
+        ax.set_xticklabels(
+            ["0", r"$\frac{\pi}{2}$", r"$\pi$", r"$\frac{3\pi}{2}$"], fontsize=14
         )
+        ax.set_yticks([])
+        ax.pcolormesh(
+            Theta, R, Theta, cmap=cmap, norm=norm
+        )  # , shading="auto", alpha=R / R.max())
+        return cmap
 
+    def create_animation(
+        self,
+        interval: int = 200,
+    ) -> tuple[plt.Figure, animation.FuncAnimation]:
+        """Create an animation of complex matrix Hinton plots.
 
-def setup_figure(
-    shape: tuple[int, int],
-    title: str = "Complex Matrix Hinton Plot",
-    row_names: list[str] | None = None,
-    col_names: list[str] | None = None,
-) -> tuple[plt.Figure, plt.Axes, plt.Axes]:
-    """Set up the figure and axes for the Hinton plot.
+        Args:
+            data: Complex array of shape (time, row, column)
+            interval: Time interval between frames in milliseconds
 
-    Args:
-        shape: Shape of the matrix (rows, columns)
-        title: Title of the plot
+        Returns:
+            Figure and Animation objects
+        """
+        self.setup_figure()
 
-    Returns:
-        Figure and Axes objects
-    """
-    plt.ioff()
-    fig = plt.figure(figsize=(14, 10))  # Increased figure size for colorbar
-
-    # Create main axis for the plot
-    ax = plt.axes((0.1, 0.1, 0.7, 0.8))  # [left, bottom, width, height]
-    rows, cols = shape
-    set_ax(ax, cols, rows, title, row_names=row_names, col_names=col_names)
-    # Create polar axis for the colorbar
-    cax = plt.axes((0.75, 0.4, 0.2, 0.2), projection="polar")
-
-    return fig, ax, cax
-
-
-def set_ax(
-    ax: plt.Axes,
-    cols: int,
-    rows: int,
-    title: str,
-    row_names: list[str] | None = None,
-    col_names: list[str] | None = None,
-) -> None:
-    ax.set_title(title, fontsize=24)
-    ax.set_xlim(-1, cols)
-    ax.set_ylim(-1, rows)
-    ax.grid(True)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xticks(np.arange(cols))
-    ax.set_yticks(np.arange(rows))
-    ax.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
-    ax.invert_yaxis()
-    if row_names:
-        # set fontsize=14
-        ax.set_yticklabels(row_names, fontsize=16)
-    if col_names:
-        ax.set_xticklabels(col_names, fontsize=16)
-
-
-def update(
-    frame_num: int,
-    data: np.ndarray,
-    time: np.ndarray,
-    ax: plt.Axes,
-    cmap: str = "hsv",
-    row_names: list[str] | None = None,
-    col_names: list[str] | None = None,
-    time_unit: str = "",
-) -> None:
-    """Update function for animation.
-
-    Args:
-        frame_num: Frame number
-        data: Complex array of shape (time, row, column)
-        ax: Matplotlib axes object
-        cmap: Colormap name for phase visualization
-    """
-    # Get current frame data
-    frame_data = data[frame_num]
-    rows, cols = frame_data.shape
-    ax.clear()
-    set_ax(
-        ax,
-        cols,
-        rows,
-        f"Time {time[frame_num]: .2f} {time_unit}",
-        row_names=row_names,
-        col_names=col_names,
-    )
-    # Calculate magnitudes and phases
-    magnitudes = np.abs(frame_data)
-    phases = np.angle(frame_data)  # Returns phases in range [-π, π]
-
-    # Normalize magnitudes
-    max_magnitude = magnitudes.max()
-    if max_magnitude == 0:
-        max_magnitude = 1
-
-    # Get colormap
-    _cmap = plt.get_cmap(cmap)
-
-    # Plot each element
-    for i in range(rows):
-        for j in range(cols):
-            magnitude = magnitudes[i, j]
-            phase = phases[i, j]
-            value = frame_data[i, j]
-
-            if magnitude > 0:
-                # Size based on normalized magnitude
-                size = (magnitude / max_magnitude) * 0.95
-
-                # Color based on phase (normalize from [-π, π] to [0, 1])
-                color = _cmap((phase + np.pi) / (2 * np.pi))
-
-                # Create and add rectangle
-                rect = Rectangle(
-                    (j - size / 2, i - size / 2),
-                    size,
-                    size,
-                    facecolor=color,
-                    edgecolor="gray",
-                )
-                ax.add_patch(rect)
-
-                # Add text annotation
-                text = f"{value: .2f}"
-                ax.text(
-                    j,
-                    i,
-                    text,
-                    horizontalalignment="center",
-                    verticalalignment="center",
-                    fontsize=8,
-                    color="white",
-                    bbox=dict(facecolor="black", alpha=0.7, edgecolor="none"),
-                )
-
-
-def set_cyclic_colorbar(ax: plt.Axes) -> mcolors.Colormap:
-    theta = np.linspace(0.0, 2 * np.pi, 100)
-    r = np.linspace(0, 1, 100)
-
-    Theta, R = np.meshgrid(theta, r)
-
-    cmap = plt.get_cmap("hsv")
-    norm = mcolors.Normalize(vmin=0.0, vmax=2 * np.pi)
-
-    ax.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2])
-    ax.set_xticklabels(
-        ["0", r"$\frac{\pi}{2}$", r"$\pi$", r"$\frac{3\pi}{2}$"], fontsize=14
-    )
-    ax.set_yticks([])
-    ax.pcolormesh(
-        Theta, R, Theta, cmap=cmap, norm=norm
-    )  # , shading="auto", alpha=R / R.max())
-    return cmap
-
-
-def create_animation(
-    data: np.ndarray,
-    time: np.ndarray,
-    title: str = "Complex Matrix Hinton Plot",
-    row_names: list[str] | None = None,
-    col_names: list[str] | None = None,
-    time_unit: str = "",
-    interval: int = 200,
-) -> tuple[plt.Figure, animation.FuncAnimation]:
-    """Create an animation of complex matrix Hinton plots.
-
-    Args:
-        data: Complex array of shape (time, row, column)
-        interval: Time interval between frames in milliseconds
-
-    Returns:
-        Figure and Animation objects
-    """
-
-    time_steps, rows, cols = data.shape
-    fig, ax, cax = setup_figure(
-        (rows, cols),
-        title=title,
-        row_names=row_names,
-        col_names=col_names,
-    )
-
-    set_cyclic_colorbar(cax)
-
-    # Create animation
-    anim = animation.FuncAnimation(
-        fig,
-        update,  # type: ignore
-        frames=time_steps,
-        fargs=(data, time, ax, "hsv", row_names, col_names, time_unit),
-        interval=interval,
-        blit=False,
-    )
-
-    return fig, anim
+        # Create animation
+        anim = animation.FuncAnimation(
+            self.fig,
+            self.update,  # type: ignore
+            frames=self.data.shape[0],
+            fargs=(),
+            interval=interval,
+            blit=False,
+        )
+        return self.fig, anim
 
 
 def save_animation(
@@ -251,29 +268,39 @@ def save_animation(
     print("Animation saved successfully!")
 
 
-def main(
+def get_anim(
     data: NDArray[np.complex128],
-    time: NDArray[np.float64] | None = None,
+    time: NDArray | None = None,
     title: str = "Complex Matrix Hinton Plot",
     row_names: list[str] | None = None,
     col_names: list[str] | None = None,
     time_unit: str = "",
     save_gif: bool = False,
     gif_filename: str = "animation.gif",
+    cmap: str = "hsv",
     fps: int = 5,
     dpi: int = 100,
 ) -> tuple[plt.Figure, animation.FuncAnimation]:
     """Main function to create Hinton plot animation from complex matrix data.
 
     Args:
-        data: Complex array of shape (time, row, column)
-        save_gif: Whether to save the animation as a GIF
-        gif_filename: Output filename for GIF
-        fps: Frames per second for GIF
-        dpi: Dots per inch for the output GIF
+        data (NDArray[np.complex128]): Complex array of shape (time, row, column).
+        time (NDArray | None, optional): Array of time points corresponding to the data. Defaults to None.
+        title (str, optional): Title of the plot. Defaults to "Complex Matrix Hinton Plot".
+        row_names (list[str] | None, optional): List of row names. Defaults to None.
+        col_names (list[str] | None, optional): List of column names. Defaults to None.
+        time_unit (str, optional): Unit of time to display on the plot. Defaults to "".
+        save_gif (bool, optional): Whether to save the animation as a GIF. Defaults to False.
+        gif_filename (str, optional): Output filename for GIF. Defaults to "animation.gif".
+        cmap (str, optional): Colormap to use for the plot. Defaults to "hsv".
+            `cmap` should be cyclic such as 'twilight', 'twilight_shifted', 'hsv'.
+            See also https://matplotlib.org/stable/users/explain/colors/colormaps.html#cyclic.
+        fps (int, optional): Frames per second for GIF. Defaults to 5.
+        dpi (int, optional): Dots per inch for the output GIF. Defaults to 100.
+
 
     Returns:
-        Figure and Animation objects
+        tuple[plt.Figure, animation.FuncAnimation]: Figure and Animation objects.
 
     Example:
         >>> # Create a 3x3 complex matrix that evolves over 10 time steps
@@ -281,22 +308,16 @@ def main(
         >>> data = np.zeros((10, 3, 3), dtype=np.complex128)
         >>> for i in range(10):
         ...     data[i] = np.exp(1j * t[i]) * np.random.random((3, 3))
-        >>> fig, anim = main(data, save_gif=True)
+        >>> fig, anim = main(data, time=t, save_gif=True)
         >>> plt.show()
     """
-    if time is None:
-        time = np.arange(data.shape[0], dtype=np.float64)
-
-    _validate_input(data, time)
-
-    fig, anim = create_animation(
-        data,
-        time,
-        title=title,
-        row_names=row_names,
-        col_names=col_names,
-        time_unit=time_unit,
+    # Create animation object
+    anim_obj = ComplexMatrixAnimation(
+        data, time, title, row_names, col_names, time_unit, cmap=cmap
     )
+
+    # Create animation
+    fig, anim = anim_obj.create_animation()
 
     if save_gif:
         save_animation(anim, gif_filename, fps, dpi)
@@ -306,32 +327,22 @@ def main(
 
 if __name__ == "__main__":
     # Create example data: rotating complex numbers
-    time_steps = 20
-    size = 3  # 3x3 matrix
-    t = np.linspace(0, 2 * np.pi, time_steps)
-
-    # Initialize complex matrix
-    test_data = np.zeros((time_steps, size, size), dtype=np.complex128)
-
-    # Create rotating complex numbers with varying magnitudes
-    for i in range(time_steps):
-        magnitude = np.random.random((size, size)) + 0.5  # Random magnitudes > 0.5
-        phase = (
-            t[i] + np.random.random((size, size)) * np.pi / 4
-        )  # Base rotation + noise
-        test_data[i] = magnitude * np.exp(1j * phase)
-
+    time = np.load("time.npy")
+    data = np.load("data.npy")
+    print(f"{data.shape=}, {time.shape=}, {data.dtype=}, {time.dtype=}")
+    size = data.shape[1]
     # Create animation and save as GIF
     print("Creating animation...")
-    fig, anim = main(
-        test_data,
-        time=t,
-        title="Complex Matrix Hinton Plot",
+    fig, anim = get_anim(
+        data,
+        time=time,
+        title="Density Matrix Evolution",
         save_gif=True,
         gif_filename="complex_matrix.gif",
+        cmap="twilight_shifted",
         time_unit="fs",
-        row_names=[r"$|0\rangle$", r"$|1\rangle$", r"$|2\rangle$"],
-        col_names=[r"$\langle 0|$", r"$\langle 1|$", r"$\langle 2|$"],
+        row_names=["$|" + f"{i}" + r"\rangle$" for i in range(size)],
+        col_names=[r"$\langle" + f"{i}" + r"|$" for i in range(size)],
         fps=5,
         dpi=100,
     )
